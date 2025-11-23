@@ -8,11 +8,16 @@ void main() {
 
 class WeatherDashboardApp extends StatelessWidget {
   const WeatherDashboardApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Weather Dashboard',
-      theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal), useMaterial3: true),
+      title: 'Personalized Weather Dashboard',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
+        useMaterial3: true,
+      ),
       home: const DashboardScreen(),
     );
   }
