@@ -13,14 +13,19 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   final _indexCtrl = TextEditingController();
+
   double? _lat, _lon;
   String? _temp, _wind, _code, _time, _url;
-  bool _isLoading = false, _isCached = false;
+
+  bool _isLoading = false;
+  bool _isCached = false;
+
+  // Only one error variable — shown inside TextField
+  String? _indexError;
 
   @override
   void initState() {
     super.initState();
-    _indexCtrl.addListener(_updateCoords);
     _loadCache();
   }
 
@@ -30,20 +35,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     super.dispose();
   }
 
-  // Validate only when Fetch is pressed
-  bool _isValidIndex(String index) {
-    final regex = RegExp(r'^[0-9]{6}[A-Za-z]$');
-    return regex.hasMatch(index);
-  }
-
-  void _updateCoords() {
-    final coords = CoordsCalculator.fromIndex(_indexCtrl.text);
-    setState(() {
-      _lat = coords?['lat'];
-      _lon = coords?['lon'];
-    });
-  }
-
   Future<void> _loadCache() async {
     final data = await WeatherService.loadCacheOnly();
     if (data != null) {
@@ -51,46 +42,72 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  bool _isValidIndex(String index) {
+    final regex = RegExp(r'^[0-9]{6}[A-Za-z]$');
+    return regex.hasMatch(index);
+  }
+
+  // MAIN FETCH METHOD — Updated as per your request
   Future<void> _fetch() async {
-    final index = _indexCtrl.text.trim();
+    final index = _indexCtrl.text.trim().toUpperCase();
+
+    // Always clear error first
+    setState(() => _indexError = null);
 
     if (!_isValidIndex(index)) {
-      _showSnack("Invalid index! Format must be: 6 digits + 1 letter (e.g. 224287X)");
+      setState(() {
+        _indexError = "Invalid format! Use 6 digits + 1 letter (e.g. 224287X)";
+      });
       return;
     }
 
-    if (_lat == null || _lon == null) {
-      _showSnack('Enter a valid index');
+    final coords = CoordsCalculator.fromIndex(index.substring(0, 4));
+    if (coords == null) {
+      setState(() {
+        _indexError = "Invalid coordinates from index";
+      });
       return;
     }
+
+    final lat = coords['lat']!;
+    final lon = coords['lon']!;
 
     setState(() => _isLoading = true);
 
-    final data = await WeatherService.fetchWeather(_lat!, _lon!);
+    final data = await WeatherService.fetchWeather(lat, lon);
 
     if (data != null) {
+      // Online → success
       _updateFromData(data, isCached: false);
+      setState(() => _indexError = null); // Clear any error
     } else {
-      setState(() => _isCached = true);
-      _showSnack('No internet – showing cached data');
+      // OFFLINE
+      final cached = await WeatherService.loadCacheOnly();
+      if (cached != null) {
+        _updateFromData(cached, isCached: true);
+        setState(() {
+          _indexError = "You are offline — showing cached data";
+        });
+      } else {
+        setState(() {
+          _indexError = "You are offline and no previous data";
+        });
+      }
     }
 
     setState(() => _isLoading = false);
   }
 
   void _updateFromData(Map<String, String> data, {required bool isCached}) {
-    final temp = data['info']!.split('•')[0].trim();
-    final wind = data['info']!.split('•')[1].trim();
-    final code = data['code']!;
-    final time = _formatTime(data['time']!);
-
     setState(() {
-      _temp = temp;
-      _wind = wind;
-      _code = code;
-      _time = time;
+      _temp = data['info']!.split('•')[0].trim();
+      _wind = data['info']!.split('•')[1].trim();
+      _code = data['code']!;
+      _time = _formatTime(data['time']!);
       _url = data['url'];
       _isCached = isCached;
+      _lat = double.tryParse(data['lat']!);
+      _lon = double.tryParse(data['lon']!);
     });
   }
 
@@ -102,128 +119,120 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  void _showSnack(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
-  }
-
   Widget _weatherIcon(int code) {
-    if (code == 0) return const Icon(Icons.wb_sunny, size: 36, color: Colors.orange);
-    if (code <= 3) return const Icon(Icons.cloud, size: 36, color: Colors.grey);
-    if (code <= 48) return const Icon(Icons.grain, size: 36, color: Colors.blueGrey);
-    if (code <= 67) return const Icon(Icons.umbrella, size: 36, color: Colors.blue);
-    return const Icon(Icons.flash_on, size: 36, color: Colors.deepPurple);
+    if (code == 0) return const Icon(Icons.wb_sunny, size: 42, color: Colors.orange);
+    if (code <= 3) return const Icon(Icons.cloud, size: 42, color: Colors.grey);
+    if (code <= 48) return const Icon(Icons.grain, size: 42, color: Colors.blueGrey);
+    if (code <= 67) return const Icon(Icons.umbrella, size: 42, color: Colors.blue);
+    if (code <= 99) return const Icon(Icons.flash_on, size: 42, color: Colors.deepPurple);
+    return const Icon(Icons.help_outline, size: 42);
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final canFetch = _lat != null && _lon != null && !_isLoading;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Weather Dashboard'),
-        centerTitle: true,
-        elevation: 2,
+        title: const Text("Personalized Weather Dashboard"),
+        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // INPUT FIELD (no live errors now)
+            // INPUT FIELD
             Card(
-              elevation: 3,
+              elevation: 4,
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: TextField(
                   controller: _indexCtrl,
+                  inputFormatters: [UpperCaseTextFormatter()],
                   textCapitalization: TextCapitalization.characters,
                   decoration: InputDecoration(
-                    labelText: 'Student Index',
-                    hintText: 'e.g. 224287X',
+                    labelText: "Enter Student Index",
+                    hintText: "e.g. 224287X",
                     border: const OutlineInputBorder(),
+                    errorText: _indexError, // ← Offline message appears HERE in red
+                    errorMaxLines: 2,
+                    prefixIcon: const Icon(Icons.school),
                     suffixIcon: _indexCtrl.text.isNotEmpty
                         ? IconButton(
                             icon: const Icon(Icons.clear),
-                            onPressed: () => setState(() => _indexCtrl.clear()),
+                            onPressed: () {
+                              _indexCtrl.clear();
+                              setState(() {
+                                _indexError = null;
+                                _lat = _lon = _temp = _wind = _code = _time = _url = null;
+                                _isCached = false;
+                              });
+                            },
                           )
                         : null,
                   ),
+                  onSubmitted: (_) => _fetch(),
                 ),
               ),
             ),
 
-            const SizedBox(height: 12),
+            const SizedBox(height: 16),
 
+            // FETCH BUTTON
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _isLoading ? null : _fetch,
+                style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
+                child: _isLoading
+                    ? const CircularProgressIndicator(color: Colors.white)
+                    : const Text("Fetch Weather", style: TextStyle(fontSize: 16)),
+              ),
+            ),
+
+            const SizedBox(height: 20),
+
+            // LOCATION
             if (_lat != null && _lon != null)
               Card(
-                elevation: 2,
                 child: ListTile(
                   leading: const Icon(Icons.location_on, color: Colors.teal),
-                  title: Text(
-                    'Lat: ${_lat!.toStringAsFixed(2)}  •  Lon: ${_lon!.toStringAsFixed(2)}',
-                    style: theme.textTheme.titleMedium,
-                  ),
+                  title: Text("Location: ${_lat!.toStringAsFixed(2)}, ${_lon!.toStringAsFixed(2)}"),
                 ),
               ),
 
             const SizedBox(height: 20),
 
-            ElevatedButton(
-              onPressed: canFetch ? _fetch : null,
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                elevation: 4,
-              ),
-              child: _isLoading
-                  ? const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                    )
-                  : const Text('Fetch Weather', style: TextStyle(fontSize: 16)),
-            ),
-
-            const SizedBox(height: 24),
-
-            if (_temp != null && _wind != null && _code != null)
+            // WEATHER CARD
+            if (_temp != null)
               Card(
-                elevation: 4,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                elevation: 5,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                 child: Padding(
-                  padding: const EdgeInsets.all(20),
+                  padding: const EdgeInsets.all(24),
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
                         children: [
-                          _weatherIcon(int.tryParse(_code!) ?? 0),
+                          _weatherIcon(int.tryParse(_code ?? "0") ?? 0),
                           const SizedBox(width: 12),
-                          const Text('Current Weather',
-                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                          const Text("Current Weather", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                           const Spacer(),
                           if (_isCached)
-                            Chip(
-                              label: const Text('Cached', style: TextStyle(fontSize: 10)),
+                            const Chip(
+                              label: Text("CACHED", style: TextStyle(fontSize: 10, color: Colors.white)),
                               backgroundColor: Colors.redAccent,
                             ),
                         ],
                       ),
-                      const Divider(height: 24),
-
-                      _buildInfoRow(Icons.thermostat, 'Temperature', _temp!, Colors.redAccent),
+                      const Divider(height: 32),
+                      _infoRow(Icons.thermostat, "Temperature", _temp!, Colors.redAccent),
                       const SizedBox(height: 12),
-                      _buildInfoRow(Icons.air, 'Wind Speed', _wind!, Colors.blue),
+                      _infoRow(Icons.air, "Wind Speed", _wind!, Colors.blue),
                       const SizedBox(height: 12),
-                      _buildInfoRow(Icons.tag, 'Weather Code', _code!, Colors.purple),
-
-                      const SizedBox(height: 16),
-
-                      Text(
-                        'Last updated: $_time',
-                        style: theme.textTheme.bodySmall!.copyWith(color: Colors.grey[600]),
-                      ),
+                      _infoRow(Icons.tag, "Weather Code", _code!, Colors.purple),
+                      const SizedBox(height: 20),
+                      Text("Last updated: $_time", style: TextStyle(color: Colors.grey[600])),
                     ],
                   ),
                 ),
@@ -231,20 +240,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
             const SizedBox(height: 16),
 
+            // API URL (optional debug)
             if (_url != null)
-              GestureDetector(
-                onTap: () {
-                  Clipboard.setData(ClipboardData(text: _url!));
-                  _showSnack('Request URL copied!');
-                },
-                child: Chip(
-                  avatar: const Icon(Icons.link, size: 16),
-                  label: Text(
-                    _url!,
-                    style: const TextStyle(fontSize: 10),
-                    overflow: TextOverflow.ellipsis,
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.link, size: 16),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text(_url!, style: const TextStyle(fontSize: 10))),
+                    ],
                   ),
-                  backgroundColor: Colors.grey.shade200,
                 ),
               ),
           ],
@@ -253,19 +260,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildInfoRow(IconData icon, String label, String value, Color color) {
+  Widget _infoRow(IconData icon, String label, String value, Color color) {
     return Row(
       children: [
-        Icon(icon, size: 28, color: color),
-        const SizedBox(width: 12),
+        Icon(icon, size: 32, color: color),
+        const SizedBox(width: 16),
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-            Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            Text(label, style: const TextStyle(fontSize: 13, color: Colors.grey)),
+            Text(value, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
           ],
         ),
       ],
     );
+  }
+}
+
+// Auto-uppercase input
+class UpperCaseTextFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
+    return newValue.copyWith(text: newValue.text.toUpperCase());
   }
 }

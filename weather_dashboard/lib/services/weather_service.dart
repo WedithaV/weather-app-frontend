@@ -20,6 +20,8 @@ class WeatherService {
           'time': DateTime.now().toIso8601String(),
           'url': url,
           'code': data['weathercode'].toString(),
+          'lat': lat.toString(),
+          'lon': lon.toString(),
         };
 
         await _save(result);
@@ -47,6 +49,8 @@ class WeatherService {
         'time': prefs.getString('time')!,
         'url': prefs.getString('url')!,
         'code': prefs.getString('code')!,
+        'lat': prefs.getString('lat')!,
+        'lon': prefs.getString('lon')!,
       };
     }
     return null;
